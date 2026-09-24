@@ -1,0 +1,48 @@
+# Build output
+bin/
+obj/
+
+# Extracted Core Temp runtime (generated on first run)
+.ctlib/
+
+# User settings saved at runtime
+settings.cfg
+
+# Claude Code memory (local AI assistant state)
+.claude/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.slnx.user
+
+# Rider / JetBrains
+.idea/
+*.DotSettings.user
+
+# NuGet
+packages/*/
+!packages/repositories.config
+
+# Logs / debug artifacts
+*.log
+*.pdb
+sensors_dump.txt
+lhm_report.txt
+
+# Intel Power Gadget files (Intel-licensed, not redistributed). Drop them into lib/ locally
+# to enable the optional Intel power readout; the build picks them up automatically.
+EnergyLib64.dll
+EnergyDriver.inf
+EnergyDriver.sys
+lib/EnergyLib64.dll
+lib/EnergyDriver.inf
+lib/EnergyDriver.sys
+lib/mfc140u.dll
+lib/vcruntime140.dll
+lib/msvcp140.dll
+lib/concrt140.dll
+lib/vccorlib140.dll
