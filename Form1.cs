@@ -83,7 +83,14 @@ namespace frm_sys_monitor
         private bool   _vbsDisableAttempted;    // we already disabled VBS once; if it's still on, it's Core isolation/policy
         private PerformanceCounter _cpuPerfCounter;
 
-        private static readonly string SettingsPath =
+        // Per-user data lives in %LocalAppData%\SystemMonitor, not next to the exe: the exe folder
+        // may be synced (OneDrive Desktop) or shared, and should stay just the exe.
+        private static readonly string DataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SystemMonitor");
+        private static readonly string SettingsPath = Path.Combine(DataDir, "settings.cfg");
+        private static readonly string ErrorLogPath = Path.Combine(DataDir, "hw_error.log");
+        // Versions up to 1.2.0 wrote settings.cfg next to the exe; read once and moved.
+        private static readonly string LegacySettingsPath =
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.cfg");
 
         // Dynamic label added when HVCI hides lblPower
@@ -142,7 +149,11 @@ namespace frm_sys_monitor
 
         private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Escape) Application.Exit();
+            // Esc used to quit immediately, which was easy to hit by accident.
+            if (e.KeyCode == Keys.Escape
+                && MessageBox.Show("Exit System Monitor?", "System Monitor",
+                       MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                Application.Exit();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -491,7 +502,7 @@ namespace frm_sys_monitor
 
             try
             {
-                var log = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "hw_error.log");
+                var log = ErrorLogPath;
                 if (File.Exists(log))
                 {
                     string err = File.ReadAllText(log);
@@ -685,8 +696,21 @@ namespace frm_sys_monitor
                 _trayIcon.Icon = CreateTrayIcon();
         }
 
+        private static void MigrateLegacySettings()
+        {
+            try
+            {
+                if (File.Exists(SettingsPath) || !File.Exists(LegacySettingsPath)) return;
+                Directory.CreateDirectory(DataDir);
+                File.Copy(LegacySettingsPath, SettingsPath);
+                File.Delete(LegacySettingsPath);
+            }
+            catch { }
+        }
+
         private void LoadSettings()
         {
+            MigrateLegacySettings();
             if (!File.Exists(SettingsPath)) { ApplyAccentColor(_accentColor); return; }
             try
             {
@@ -717,7 +741,8 @@ namespace frm_sys_monitor
 
         private void SaveSettings()
         {
-            try { File.WriteAllText(SettingsPath,
+            try { Directory.CreateDirectory(DataDir);
+                File.WriteAllText(SettingsPath,
                 // Hex only: ToHtml() returns names like "Cyan"/"Red", which LoadSettings can't parse back.
                 "AccentColor=" + $"{_accentColor.R:X2}{_accentColor.G:X2}{_accentColor.B:X2}" + "\r\n" +
                 "AutoCheckUpdates=" + (_autoCheckUpdates ? "1" : "0") + "\r\n" +
@@ -822,7 +847,8 @@ namespace frm_sys_monitor
             {
                 monitorsMenu.DropDownItems.Clear();
                 var screens = Screen.AllScreens;
-                monitorsMenu.Enabled = screens.Length > 1;
+                // Only useful with 2+ displays; hidden instead of a greyed-out item that looks broken.
+                monitorsMenu.Visible = screens.Length > 1;
                 for (int i = 0; i < screens.Length; i++)
                 {
                     var scr = screens[i];
@@ -917,9 +943,8 @@ namespace frm_sys_monitor
                 }
                 catch (Exception ex)
                 {
-                    try { File.WriteAllText(
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "hw_error.log"),
-                        ex.ToString()); }
+                    try { Directory.CreateDirectory(DataDir);
+                          File.WriteAllText(ErrorLogPath, ex.ToString()); }
                     catch { }
                 }
                 finally { _hardwareReady = true; }

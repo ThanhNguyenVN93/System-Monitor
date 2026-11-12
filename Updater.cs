@@ -40,13 +40,16 @@ namespace frm_sys_monitor
 
         public static bool IsNewer(ReleaseInfo r) => ReleaseLogic.IsNewer(CurrentVersion, r.Version);
 
-        // Downloads next to the running exe and verifies the published SHA-256.
+        // Downloads into the admin-only runtime directory and verifies the published SHA-256.
+        // It must not go next to the exe: that folder may be user-writable (Desktop, Downloads),
+        // and a non-admin process could swap the verified file before the elevated swap script
+        // moves it into place.
         // Note: the checksum comes from the same release, so it guards against corrupted or
         // truncated downloads, not against a compromised GitHub account (the exe is unsigned).
         // Returns the path of the verified file; throws on any failure (file is deleted).
         public static string Download(ReleaseInfo r)
         {
-            string target = System.Windows.Forms.Application.ExecutablePath + ".new";
+            string target = Path.Combine(RuntimeDir.Ensure(), "update.exe.new");
             try
             {
                 using (var wc = CreateClient())
@@ -75,11 +78,13 @@ namespace frm_sys_monitor
 
         // The running exe is locked, so a small script waits for this process to exit,
         // moves the new file over it and relaunches. The caller must exit right after.
+        // The script runs elevated, so it lives in the admin-only runtime directory, not %TEMP%,
+        // which the non-elevated user could write to between creation and execution.
         public static void ApplyAndRestart(string newFile)
         {
             string exe = ReleaseLogic.EscapeForBatch(System.Windows.Forms.Application.ExecutablePath);
             newFile    = ReleaseLogic.EscapeForBatch(newFile);
-            string bat = Path.Combine(Path.GetTempPath(), "sysmon_update_" + Guid.NewGuid().ToString("N") + ".cmd");
+            string bat = Path.Combine(RuntimeDir.Ensure(), "update_" + Guid.NewGuid().ToString("N") + ".cmd");
 
             var sb = new StringBuilder();
             sb.AppendLine("@echo off");

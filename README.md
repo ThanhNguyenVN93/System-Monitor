@@ -78,12 +78,25 @@ normal users can't modify, e.g. `C:\Program Files\System Monitor`. If it runs fr
 Downloads, it shows a one-time warning. After moving it, toggle tray → *Start with Windows* off and on
 so the scheduled task points to the new path.
 
+Settings (`settings.cfg`) and the hardware error log (`hw_error.log`) are kept in
+`%LocalAppData%\SystemMonitor`, so the exe folder holds only the exe. A `settings.cfg` left next to the
+exe by version 1.2.0 or older is moved there on first start.
+
 ## Updates
 
 Release assets are `SystemMonitor.exe` and `SystemMonitor.exe.sha256`. The app checks the latest
 release shortly after start (toggle: tray → *Check for updates on startup*), shows a tray notification
-and only downloads after you confirm. The download is verified against the published SHA-256, then the
-exe is swapped and the app restarts.
+and only downloads after you confirm. The download goes into the admin-only `%ProgramData%\SystemMonitor`
+folder and is verified against the published SHA-256 there; then the exe is swapped and the app restarts.
+
+## Releasing
+
+1. Bump `AssemblyVersion` / `AssemblyFileVersion` in `Properties/AssemblyInfo.cs`.
+2. Merge to `master`, then push a matching tag, e.g. `git tag v1.2.1 && git push origin v1.2.1`.
+
+The **Release** workflow checks that the tag matches the version, builds, runs the tests and publishes
+`SystemMonitor.exe` + `SystemMonitor.exe.sha256` to a GitHub Release. The CI build has no Intel Power
+Gadget files; to ship a build with them, build locally and replace both assets on the release.
 
 ## Third-party Libraries
 
