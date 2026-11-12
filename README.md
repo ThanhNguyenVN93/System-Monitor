@@ -51,9 +51,12 @@ If sensors work, none of this is shown, even when VBS is on.
 msbuild frm_sys_monitor.csproj /p:Configuration=Release
 ```
 
-Output: `bin\Release\System Monitor.exe` — a single self-contained executable; libraries and the
-PawnIO driver are embedded and extracted on first run into `%ProgramData%\SystemMonitor`, a folder
-only Administrators can write to.
+No NuGet restore is needed: every dependency is checked in under `lib\` and referenced from there.
+
+Output: `bin\Release\System Monitor.exe` — the only file in the folder. Libraries and the PawnIO
+driver are embedded as resources (nothing is copied next to the exe, no `.config` file); at runtime
+they are loaded from memory, or extracted into `%ProgramData%\SystemMonitor`, a folder only
+Administrators can write to, when they must exist on disk.
 
 Unit tests (pure logic: sensor selection, release parsing, folder ACL check):
 

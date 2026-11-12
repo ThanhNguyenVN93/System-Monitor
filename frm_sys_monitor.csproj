@@ -10,7 +10,7 @@
     <AssemblyName>System Monitor</AssemblyName>
     <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
@@ -37,20 +37,20 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Guna.UI2, Version=2.0.4.7, Culture=neutral, PublicKeyToken=8b9d14aa5142e261, processorArchitecture=MSIL">
-      <HintPath>packages\Guna.UI2.WinForms.2.0.4.7\lib\net48\Guna.UI2.dll</HintPath>
+      <HintPath>lib\Guna.UI2.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Microsoft.Win32.Registry, Version=4.1.1.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\Microsoft.Win32.Registry.4.5.0\lib\net461\Microsoft.Win32.Registry.dll</HintPath>
+      <HintPath>lib\Microsoft.Win32.Registry.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="LibreHardwareMonitorLib">
-      <HintPath>packages\LibreHardwareMonitorLib.0.9.6\runtimes\win-x64\lib\net472\LibreHardwareMonitorLib.dll</HintPath>
+      <HintPath>lib\LibreHardwareMonitorLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Buffers.4.6.1\lib\net462\System.Buffers.dll</HintPath>
+      <HintPath>lib\System.Buffers.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Core" />
@@ -59,28 +59,28 @@
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Memory, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Memory.4.6.3\lib\net462\System.Memory.dll</HintPath>
+      <HintPath>lib\System.Memory.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Numerics" />
     <Reference Include="System.Numerics.Vectors, Version=4.1.6.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Numerics.Vectors.4.6.1\lib\net462\System.Numerics.Vectors.dll</HintPath>
+      <HintPath>lib\System.Numerics.Vectors.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=6.0.3.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.6.1.2\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <HintPath>lib\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Security.AccessControl, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Security.AccessControl.6.0.0\lib\net461\System.Security.AccessControl.dll</HintPath>
+      <HintPath>lib\System.Security.AccessControl.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Security.Principal.Windows, Version=5.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Security.Principal.Windows.5.0.0\lib\net461\System.Security.Principal.Windows.dll</HintPath>
+      <HintPath>lib\System.Security.Principal.Windows.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Threading.AccessControl, Version=10.0.0.3, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Threading.AccessControl.10.0.3\lib\net462\System.Threading.AccessControl.dll</HintPath>
+      <HintPath>lib\System.Threading.AccessControl.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Web" />
@@ -119,7 +119,6 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -131,82 +130,8 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.config" />
     <None Include="app.ico" />
     <None Include="app.manifest" />
-    <!-- PawnIo kernel driver (required by LHM for MSR/RAPL access) -->
-    <Content Include="lib\pawnio.sys">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\pawnio.inf">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <!-- Optional Intel Power Gadget files (not in the repo): only used when lib\EnergyLib64.dll exists -->
-    <Content Include="lib\EnergyDriver.inf" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\EnergyDriver.sys" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <!-- Intel Power Gadget native DLLs — copy to output so P/Invoke finds them -->
-    <Content Include="lib\EnergyLib64.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\mfc140u.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\vcruntime140.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\msvcp140.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\concrt140.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\vccorlib140.dll" Condition="Exists('lib\EnergyLib64.dll')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <!-- Copy bundled DLLs to output for Debug; Release uses embedded resources -->
-    <Content Include="lib\RAMSPDToolkit-NDD.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\DiskInfoToolkit.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\BlackSharp.Core.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\Guna.UI2.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\LibreHardwareMonitorLib.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\Microsoft.Win32.Registry.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Buffers.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Memory.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Numerics.Vectors.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Runtime.CompilerServices.Unsafe.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Security.AccessControl.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Security.Principal.Windows.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="lib\System.Threading.AccessControl.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <!-- PawnIo kernel driver embedded with "pawnio." prefix -->
     <EmbeddedResource Include="lib\pawnio.sys">
       <LogicalName>pawnio.pawnio.sys</LogicalName>
@@ -281,46 +206,4 @@
     </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Target Name="RemoveBundledDlls" AfterTargets="Build">
-    <RemoveDir Directories="$(OutputPath)lib" />
-    <ItemGroup>
-      <_BundledRootFiles Include="
-        $(OutputPath)concrt140.dll;
-        $(OutputPath)EnergyDriver.inf;
-        $(OutputPath)EnergyDriver.sys;
-        $(OutputPath)EnergyLib64.dll;
-        $(OutputPath)LibreHardwareMonitorLib.dll;
-        $(OutputPath)LibreHardwareMonitorLib.xml;
-        $(OutputPath)mfc140u.dll;
-        $(OutputPath)msvcp140.dll;
-        $(OutputPath)vccorlib140.dll;
-        $(OutputPath)vcruntime140.dll;
-        $(OutputPath)BlackSharp.Core.dll;
-        $(OutputPath)BlackSharp.Core.xml;
-        $(OutputPath)DiskInfoToolkit.dll;
-        $(OutputPath)DiskInfoToolkit.xml;
-        $(OutputPath)Guna.UI2.dll;
-        $(OutputPath)Microsoft.Win32.Registry.dll;
-        $(OutputPath)pawnio.sys;
-        $(OutputPath)pawnio.inf;
-        $(OutputPath)RAMSPDToolkit-NDD.dll;
-        $(OutputPath)RAMSPDToolkit-NDD.xml;
-        $(OutputPath)System.Buffers.dll;
-        $(OutputPath)System.Buffers.xml;
-        $(OutputPath)System.Memory.dll;
-        $(OutputPath)System.Memory.xml;
-        $(OutputPath)System.Numerics.Vectors.dll;
-        $(OutputPath)System.Numerics.Vectors.xml;
-        $(OutputPath)System.Runtime.CompilerServices.Unsafe.dll;
-        $(OutputPath)System.Runtime.CompilerServices.Unsafe.xml;
-        $(OutputPath)System.Security.AccessControl.dll;
-        $(OutputPath)System.Security.AccessControl.xml;
-        $(OutputPath)System.Security.Principal.Windows.dll;
-        $(OutputPath)System.Security.Principal.Windows.xml;
-        $(OutputPath)System.Threading.AccessControl.dll;
-        $(OutputPath)System.Threading.AccessControl.xml
-      " />
-    </ItemGroup>
-    <Delete Files="@(_BundledRootFiles)" />
-  </Target>
 </Project>
