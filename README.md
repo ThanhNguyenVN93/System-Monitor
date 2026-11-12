@@ -2,8 +2,6 @@
 
 A lightweight, always-on-top HUD overlay for Windows that displays real-time system stats with an acrylic blur background.
 
-![screenshot](docs/screenshot.png)
-
 ## Features
 
 - **CPU** — load %, temperature (°C), clock speed (GHz), power draw (W)
@@ -40,7 +38,6 @@ The app does not guess from Windows settings. It watches whether CPU temperature
 actually be read; if neither can for ~10 seconds it works out why:
 
 - **Not running as Administrator** → tooltip on the CPU line, no security prompt.
-- **Secure Boot** on → balloon tip explaining it.
 - **VBS / Memory Integrity running** (detected via WMI `Win32_DeviceGuard`, not the registry) →
   asks whether to disable VBS / HVCI / Hyper-V. Choosing *No* is remembered; use the tray item
   **Check CPU Sensor Access...** to revisit. Disabling these lowers Windows protection and stops
@@ -55,7 +52,14 @@ msbuild frm_sys_monitor.csproj /p:Configuration=Release
 ```
 
 Output: `bin\Release\System Monitor.exe` — a single self-contained executable; libraries and the
-PawnIO driver are embedded and extracted on first run.
+PawnIO driver are embedded and extracted on first run into `%ProgramData%\SystemMonitor`, a folder
+only Administrators can write to.
+
+Unit tests (pure logic: sensor selection, release parsing, folder ACL check):
+
+```
+dotnet test tests/frm_sys_monitor.Tests
+```
 
 ### Optional: Intel Power Gadget
 
@@ -63,6 +67,13 @@ PawnIO driver are embedded and extracted on first run.
 belong to Intel Power Gadget and are **not** included in this repository. If you own a copy, put them
 in `lib\` and rebuild; the project embeds them automatically. Without them the app simply uses
 LibreHardwareMonitor's readings.
+
+## Where to put the exe
+
+The app runs as Administrator and auto-starts with highest privileges, so keep the exe in a folder
+normal users can't modify, e.g. `C:\Program Files\System Monitor`. If it runs from somewhere like
+Downloads, it shows a one-time warning. After moving it, toggle tray → *Start with Windows* off and on
+so the scheduled task points to the new path.
 
 ## Updates
 

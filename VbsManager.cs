@@ -89,7 +89,7 @@ namespace frm_sys_monitor
                 // Disable HVCI
                 RunReg(@"add ""HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"" /v Enabled /t REG_DWORD /d 0 /f");
                 // Disable Hyper-V boot
-                RunBcdedit("hypervisorlaunchtype off");
+                RunBcdedit("/set hypervisorlaunchtype off");
                 return true;
             }
             catch (Exception ex)
@@ -99,28 +99,33 @@ namespace frm_sys_monitor
             }
         }
 
-        private static void RunReg(string args)
-        {
-            var psi = new ProcessStartInfo("reg", args)
-            {
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-            };
-            using (var p = Process.Start(psi)) p.WaitForExit();
-        }
+        private static void RunReg(string args)     => Run("reg", args);
+        private static void RunBcdedit(string args) => Run("bcdedit", args);
 
-        private static void RunBcdedit(string args)
+        // Throws with the tool's own message when it fails, so the caller never reports
+        // "disabled" for a change that didn't happen.
+        private static void Run(string exe, string args)
         {
-            var psi = new ProcessStartInfo("bcdedit", args)
+            var psi = new ProcessStartInfo(exe, args)
             {
                 UseShellExecute        = false,
                 CreateNoWindow         = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
             };
-            using (var p = Process.Start(psi)) p.WaitForExit();
+            using (var p = Process.Start(psi))
+            {
+                var stdoutTask = p.StandardOutput.ReadToEndAsync();   // drain both pipes so the child can't block
+                string stderr  = p.StandardError.ReadToEnd();
+                string stdout  = stdoutTask.Result;
+                p.WaitForExit();
+                if (p.ExitCode != 0)
+                {
+                    string msg = (stderr + " " + stdout).Trim();
+                    throw new InvalidOperationException(
+                        exe + " failed (exit " + p.ExitCode + ")" + (msg.Length > 0 ? ": " + msg : "."));
+                }
+            }
         }
     }
 }
