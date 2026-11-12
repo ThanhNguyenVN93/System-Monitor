@@ -15,8 +15,9 @@ A lightweight, always-on-top HUD overlay for Windows that displays real-time sys
 - Multi-monitor support
 - Accent color picker
 - Auto-start via Scheduled Task (no UAC prompt on login)
-- Update check against GitHub Releases (asks before installing, SHA-256 verified)
+- Automatic updates from GitHub Releases (SHA-256 verified; can be turned off)
 - **Report Issue** in the tray menu: copies diagnostics to the clipboard and opens the support page
+- **About System Monitor...** in the tray menu: version, license, project page
 
 ## Requirements
 
@@ -84,10 +85,19 @@ exe by version 1.2.0 or older is moved there on first start.
 
 ## Updates
 
-Release assets are `SystemMonitor.exe` and `SystemMonitor.exe.sha256`. The app checks the latest
-release shortly after start (toggle: tray → *Check for updates on startup*), shows a tray notification
-and only downloads after you confirm. The download goes into the admin-only `%ProgramData%\SystemMonitor`
-folder and is verified against the published SHA-256 there; then the exe is swapped and the app restarts.
+Release assets are `SystemMonitor.exe` and `SystemMonitor.exe.sha256`.
+
+With tray → **Update automatically** on (the default), the app checks the latest release 15 seconds
+after start and every 6 hours. When a newer version exists it is downloaded into the admin-only
+`%ProgramData%\SystemMonitor` folder, verified against the published SHA-256, swapped in, and the app
+restarts by itself (a tray notification says so). If the swap fails, the old version is started again.
+If an automatic install fails, a notification offers to retry.
+
+With it off, nothing is checked in the background; tray → *Check for Updates...* checks on demand and
+asks before installing.
+
+Versions 1.2.1 and older only notify: click the notification or tray → *Update available* once to
+get a version that updates by itself.
 
 ## Releasing
 

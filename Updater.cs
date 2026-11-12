@@ -98,6 +98,9 @@ namespace frm_sys_monitor
             sb.AppendLine("(goto) 2>nul & del \"%~f0\"");
             sb.AppendLine(":fail");
             sb.AppendLine("del \"" + newFile + "\" >nul 2>&1");
+            // The exe couldn't be replaced (still locked, folder not writable): bring the old
+            // version back instead of leaving the user with no HUD after an automatic update.
+            sb.AppendLine("start \"\" \"" + exe + "\"");
             sb.AppendLine("(goto) 2>nul & del \"%~f0\"");
             File.WriteAllText(bat, sb.ToString(), Encoding.Default);
 
