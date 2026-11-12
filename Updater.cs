@@ -4,7 +4,6 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace frm_sys_monitor
 {
@@ -15,14 +14,6 @@ namespace frm_sys_monitor
         private const string Repo      = "ThanhNguyenVN93/System-Monitor";
         private const string ExeAsset  = "SystemMonitor.exe";
         private const string ShaAsset  = "SystemMonitor.exe.sha256";
-
-        internal class ReleaseInfo
-        {
-            public Version Version;
-            public string  Tag;
-            public string  ExeUrl;
-            public string  ShaUrl;
-        }
 
         public static Version CurrentVersion =>
             System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
@@ -40,32 +31,18 @@ namespace frm_sys_monitor
         {
             string json;
             using (var wc = CreateClient())
-                json = wc.DownloadString("https://api.github.com/repos/" + Repo + "/releases/latest");
-
-            var tag = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-            if (!tag.Success) return null;
-            if (!Version.TryParse(tag.Groups[1].Value.TrimStart('v', 'V'), out Version ver)) return null;
-
-            var info = new ReleaseInfo { Version = ver, Tag = tag.Groups[1].Value };
-            foreach (Match m in Regex.Matches(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\""))
             {
-                string url = m.Groups[1].Value;
-                if (url.EndsWith("/" + ExeAsset, StringComparison.OrdinalIgnoreCase)) info.ExeUrl = url;
-                else if (url.EndsWith("/" + ShaAsset, StringComparison.OrdinalIgnoreCase)) info.ShaUrl = url;
+                wc.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
+                json = wc.DownloadString("https://api.github.com/repos/" + Repo + "/releases/latest");
             }
-            return info.ExeUrl != null && info.ShaUrl != null ? info : null;
+            return ReleaseLogic.Parse(json, ExeAsset, ShaAsset);
         }
 
-        public static bool IsNewer(ReleaseInfo r)
-        {
-            // Compare only major.minor.build so a 4th component never causes a phantom update.
-            var cur = CurrentVersion;
-            var a = new Version(cur.Major, cur.Minor, Math.Max(cur.Build, 0));
-            var b = new Version(r.Version.Major, r.Version.Minor, Math.Max(r.Version.Build, 0));
-            return b > a;
-        }
+        public static bool IsNewer(ReleaseInfo r) => ReleaseLogic.IsNewer(CurrentVersion, r.Version);
 
         // Downloads next to the running exe and verifies the published SHA-256.
+        // Note: the checksum comes from the same release, so it guards against corrupted or
+        // truncated downloads, not against a compromised GitHub account (the exe is unsigned).
         // Returns the path of the verified file; throws on any failure (file is deleted).
         public static string Download(ReleaseInfo r)
         {
@@ -74,8 +51,8 @@ namespace frm_sys_monitor
             {
                 using (var wc = CreateClient())
                 {
-                    string expected = Regex.Match(wc.DownloadString(r.ShaUrl), "[0-9a-fA-F]{64}").Value;
-                    if (expected.Length != 64) throw new InvalidDataException("Checksum file is invalid.");
+                    string expected = ReleaseLogic.ExtractSha256(wc.DownloadString(r.ShaUrl));
+                    if (expected == null) throw new InvalidDataException("Checksum file is invalid.");
 
                     wc.DownloadFile(r.ExeUrl, target);
 
@@ -100,7 +77,8 @@ namespace frm_sys_monitor
         // moves the new file over it and relaunches. The caller must exit right after.
         public static void ApplyAndRestart(string newFile)
         {
-            string exe = System.Windows.Forms.Application.ExecutablePath;
+            string exe = ReleaseLogic.EscapeForBatch(System.Windows.Forms.Application.ExecutablePath);
+            newFile    = ReleaseLogic.EscapeForBatch(newFile);
             string bat = Path.Combine(Path.GetTempPath(), "sysmon_update_" + Guid.NewGuid().ToString("N") + ".cmd");
 
             var sb = new StringBuilder();

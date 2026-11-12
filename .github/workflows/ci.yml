@@ -45,8 +45,10 @@ jobs:
             $projDir = $_.Directory.FullName
             $xml = [xml](Get-Content $_.FullName -Raw)
             $includes = @()
-            $includes += $xml.Project.ItemGroup.EmbeddedResource | ForEach-Object { $_.Include }
-            $includes += $xml.Project.ItemGroup.None | ForEach-Object { $_.Include }
+            # Items with a Condition are optional (e.g. only built when the file exists): leave
+            # them missing instead of satisfying the condition with a fake file.
+            $includes += $xml.Project.ItemGroup.EmbeddedResource | Where-Object { -not $_.Condition } | ForEach-Object { $_.Include }
+            $includes += $xml.Project.ItemGroup.None | Where-Object { -not $_.Condition } | ForEach-Object { $_.Include }
             foreach ($inc in $includes) {
               if ($inc) {
                 try {
@@ -81,7 +83,15 @@ jobs:
           foreach ($t in $targets) {
             Write-Host "=== Building $($t.FullName) ==="
             nuget restore $t.FullName -PackagesDirectory (Join-Path $t.DirectoryName "packages")
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             msbuild $t.FullName /t:Restore /p:Configuration=Release
             msbuild $t.FullName /p:Configuration=Release /p:FrameworkPathOverride="$env:FX_REF"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          Get-ChildItem tests -Recurse -Filter *.Tests.csproj -ErrorAction SilentlyContinue | ForEach-Object {
+            dotnet test $_.FullName --nologo
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }

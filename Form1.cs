@@ -11,173 +11,6 @@ using Microsoft.Win32;
 
 namespace frm_sys_monitor
 {
-    internal static class IntelPowerApi
-    {
-        [DllImport("EnergyLib64.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool IntelEnergyLibInitialize();
-
-        [DllImport("EnergyLib64.dll", CallingConvention = CallingConvention.Cdecl)]
-        public static extern bool GetPowerData(int packageIndex, int domainIndex,
-            out double powerW, out double energyJ, out double timeS);
-
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenSCManager(string machine, string db, uint access);
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenService(IntPtr hSCM, string name, uint access);
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr CreateService(IntPtr hSCM, string name, string displayName,
-            uint access, uint type, uint start, uint error, string binary,
-            string group, IntPtr tagId, string deps, string account, string password);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool StartService(IntPtr hSvc, uint numArgs, string[] args);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool CloseServiceHandle(IntPtr h);
-
-        // Extracts embedded files, installs driver if needed, then initializes the API.
-        public static bool TryInitialize()
-        {
-            try
-            {
-                ExtractEmbedded();
-                EnsureDriverRunning();
-                return IntelEnergyLibInitialize();
-            }
-            catch { return false; }
-        }
-
-        // Extracts all resources with "intel." prefix to the app directory.
-        private static void ExtractEmbedded()
-        {
-            var asm = System.Reflection.Assembly.GetExecutingAssembly();
-            var dir = AppDomain.CurrentDomain.BaseDirectory;
-            foreach (var res in asm.GetManifestResourceNames())
-            {
-                if (!res.StartsWith("intel.")) continue;
-                var dest = Path.Combine(dir, res.Substring("intel.".Length));
-                if (File.Exists(dest)) continue;
-                using (var s = asm.GetManifestResourceStream(res))
-                using (var f = File.Create(dest))
-                    s.CopyTo(f);
-            }
-        }
-
-        // Creates and starts the EnergyDriver service via SCM if not already running.
-        // No .cat file required — uses the embedded signature in EnergyDriver.sys.
-        private static void EnsureDriverRunning()
-        {
-            try
-            {
-                using (var sc = new ServiceController("EnergyDriver"))
-                    if (sc.Status == ServiceControllerStatus.Running) return;
-            }
-            catch { } // service doesn't exist yet — fall through to install
-
-            var sysPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "EnergyDriver.sys");
-            if (!File.Exists(sysPath)) return;
-
-            const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
-            const uint SERVICE_ALL_ACCESS    = 0xF01FF;
-            const uint SERVICE_KERNEL_DRIVER = 0x00000001;
-            const uint SERVICE_DEMAND_START  = 0x00000003;
-            const uint SERVICE_ERROR_NORMAL  = 0x00000001;
-
-            IntPtr scm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
-            if (scm == IntPtr.Zero) return;
-            try
-            {
-                IntPtr svc = OpenService(scm, "EnergyDriver", SERVICE_ALL_ACCESS);
-                if (svc == IntPtr.Zero)
-                    svc = CreateService(scm, "EnergyDriver", "EnergyDriver",
-                        SERVICE_ALL_ACCESS, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START,
-                        SERVICE_ERROR_NORMAL, sysPath, null, IntPtr.Zero, null, null, null);
-                if (svc == IntPtr.Zero) return;
-                try { StartService(svc, 0, null); }
-                finally { CloseServiceHandle(svc); }
-            }
-            finally { CloseServiceHandle(scm); }
-        }
-    }
-
-    internal static class PawnIoInstaller
-    {
-        private const string ServiceName = "PawnIo";
-
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenSCManager(string machine, string db, uint access);
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenService(IntPtr hSCM, string name, uint access);
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr CreateService(IntPtr hSCM, string name, string displayName,
-            uint access, uint type, uint start, uint error, string binary,
-            string group, IntPtr tagId, string deps, string account, string password);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool StartService(IntPtr hSvc, uint numArgs, string[] args);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool CloseServiceHandle(IntPtr h);
-
-        // Extracts pawnio.sys from embedded resources and installs the service.
-        // Must be called before Computer.Open() so LHM can use MSR sensors.
-        public static void EnsureInstalled()
-        {
-            try
-            {
-                using (var sc = new ServiceController(ServiceName))
-                    if (sc.Status == ServiceControllerStatus.Running) return;
-            }
-            catch { }
-
-            var sysPath = ExtractSys();
-            if (sysPath == null) return;
-            InstallAndStart(sysPath);
-        }
-
-        private static string ExtractSys()
-        {
-            var dest = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pawnio.sys");
-            if (File.Exists(dest)) return dest;
-
-            var asm = System.Reflection.Assembly.GetExecutingAssembly();
-            using (var s = asm.GetManifestResourceStream("pawnio.pawnio.sys"))
-            {
-                if (s == null) return null;
-                using (var f = File.Create(dest)) s.CopyTo(f);
-            }
-            return dest;
-        }
-
-        private static void InstallAndStart(string sysPath)
-        {
-            const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
-            const uint SERVICE_ALL_ACCESS    = 0xF01FF;
-            const uint SERVICE_KERNEL_DRIVER = 0x00000001;
-            const uint SERVICE_DEMAND_START  = 0x00000003;
-            const uint SERVICE_ERROR_NORMAL  = 0x00000001;
-
-            IntPtr scm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
-            if (scm == IntPtr.Zero) return;
-            try
-            {
-                IntPtr svc = OpenService(scm, ServiceName, SERVICE_ALL_ACCESS);
-                if (svc == IntPtr.Zero)
-                    svc = CreateService(scm, ServiceName, "PawnIo",
-                        SERVICE_ALL_ACCESS, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START,
-                        SERVICE_ERROR_NORMAL, sysPath, null, IntPtr.Zero, null, null, null);
-                if (svc == IntPtr.Zero) return;
-                try { StartService(svc, 0, null); }
-                finally { CloseServiceHandle(svc); }
-            }
-            finally { CloseServiceHandle(scm); }
-        }
-    }
-
-    internal class UpdateVisitor : IVisitor
-    {
-        public void VisitComputer(IComputer computer) { computer.Traverse(this); }
-        public void VisitHardware(IHardware hardware) { hardware.Update(); foreach (IHardware sub in hardware.SubHardware) sub.Accept(this); }
-        public void VisitSensor(ISensor sensor) { }
-        public void VisitParameter(IParameter parameter) { }
-    }
-
     public partial class Form1 : Form
     {
         // ── Win32 ─────────────────────────────────────────────────────────
@@ -230,6 +63,9 @@ namespace frm_sys_monitor
 
         private float  _cpuMaxClockMHz;
         private bool   _autoStart;
+        private Point? _savedLocation;
+        private bool   _autoStartConfigured;
+        private bool   _folderWarned;          // "exe folder is user-writable" advisory shown once   // first-run registration done; respect the user's choice after that
         private int    _lastCpuLoad;
         private int    _lastGpuLoad;
         private bool   _intelPowerOk;
@@ -239,7 +75,7 @@ namespace frm_sys_monitor
         private bool   _sensorCheckDone;
         private bool   _cpuSensorsOk;
         private bool   _autoCheckUpdates = true;
-        private Updater.ReleaseInfo _pendingUpdate;
+        private ReleaseInfo _pendingUpdate;
         private bool   _updateBusy;
         private bool   _balloonIsUpdate;
         private ToolStripMenuItem _updateItem;
@@ -252,15 +88,6 @@ namespace frm_sys_monitor
 
         // Dynamic label added when HVCI hides lblPower
         private Guna.UI2.WinForms.Guna2HtmlLabel _lblGpuDetail;
-
-        private static readonly string[] CpuTempPriority =
-        {
-            "CPU Package",          // Intel/AMD package sensor (most accurate)
-            "Core (Max)",           // Intel Gen 12+ LHM naming (has parentheses)
-            "Core Max",             // alternate naming without parentheses
-            "Core Average",
-            "CPU Tdie", "Tctl/Tdie", "CPU Die", "CPU", "Temperature"
-        };
 
         // ── Constructor ───────────────────────────────────────────────────
         public Form1()
@@ -290,8 +117,10 @@ namespace frm_sys_monitor
             lblMachineName.Text = $"◈  {Environment.MachineName}";
 
             LoadSettings();   // must be first — sets _accentColor before tray icon
+            RestoreSavedPosition();
             EnableAcrylic();
             InitTray();
+            WarnIfFolderUnsafe();
 
             InitHardware();
             InitCpuPerfCounter();
@@ -343,8 +172,34 @@ namespace frm_sys_monitor
             {
                 _dragging = false;
                 SnapToEdge();
+                SaveSettings();
             }
             base.OnMouseUp(e);
+        }
+
+        // Puts the HUD back where the user left it, unless that spot is no longer on any
+        // monitor (display unplugged / resolution changed) — then the default corner stays.
+        private void RestoreSavedPosition()
+        {
+            if (_savedLocation == null) return;
+            var grip = _savedLocation.Value + new Size(20, 10);   // a bit inside the top-left corner
+            foreach (var scr in Screen.AllScreens)
+                if (scr.WorkingArea.Contains(grip))
+                { this.Location = _savedLocation.Value; return; }
+        }
+
+        // The app runs elevated and auto-starts with highest privileges, so a user-writable exe
+        // folder lets any non-admin process replace what gets run as admin. Say so once.
+        private void WarnIfFolderUnsafe()
+        {
+            if (_folderWarned || !RuntimeDir.IsWritableByNonAdmins(AppDomain.CurrentDomain.BaseDirectory)) return;
+            _folderWarned = true;
+            SaveSettings();
+            _balloonIsUpdate = false;
+            _trayIcon.ShowBalloonTip(10000, "System Monitor location",
+                "This folder can be modified without admin rights. For safety, move the app to " +
+                @"C:\Program Files\System Monitor and turn ""Start with Windows"" off and on again.",
+                ToolTipIcon.Warning);
         }
 
         private void SnapToEdge()
@@ -364,72 +219,41 @@ namespace frm_sys_monitor
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // Stop producing work first, then let an in-flight sensor read finish before the
+            // objects it uses (LHM Computer, perf counter) are torn down.
+            _closing = true;
+            _systemTimer?.Stop();
+            var sw = Stopwatch.StartNew();
+            while ((_hwReading || !_hardwareReady) && sw.ElapsedMilliseconds < 3000)
+                System.Threading.Thread.Sleep(20);
+
             _toolTip?.Dispose();
-            _cpuPerfCounter?.Dispose();
             if (_trayIcon != null) { _trayIcon.Visible = false; _trayIcon.Dispose(); }
             if (_trayIconHandle != IntPtr.Zero) DestroyIcon(_trayIconHandle);
-            _systemTimer?.Stop();
-            _computer?.Close();
-            CleanupLhmDriver();
+            if (!_hwReading)
+            {
+                _cpuPerfCounter?.Dispose();
+                if (_hardwareReady) _computer?.Close();
+            }
+            IntelPowerApi.Cleanup();   // only removes EnergyDriver if this app installed it
             base.OnFormClosing(e);
         }
 
-        // ── LHM Driver Cleanup ────────────────────────────────────────────
-        // LHM may leave behind a kernel service entry (PawnIo / WinRing0) even
-        // after Computer.Close(). Remove it explicitly so it doesn't linger.
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenSCManager(string machine, string db, uint access);
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenService(IntPtr hSCM, string name, uint access);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool DeleteService(IntPtr hSvc);
-        [DllImport("advapi32.dll", SetLastError = true)]
-        private static extern bool CloseServiceHandle(IntPtr h);
-
-        // Only clean up services THIS app creates via IntelPowerApi.EnsureDriverRunning().
-        // PawnIo is installed by LHM full app and must persist so RAPL readings work.
-        private static readonly string[] LhmServiceNames =
-            { "LibreHardwareMonitor", "WinRing0_1_2_0", "EnergyDriver" };
-
-        private static void CleanupLhmDriver()
+        // BeginInvoke that is a no-op once the form is closing / disposed, so background
+        // sensor and update tasks can't throw after the window is gone.
+        private void PostToUi(Action action)
         {
-            const uint SC_MANAGER_CONNECT = 0x0001;
-            const uint SERVICE_STOP       = 0x0020;
-            const uint DELETE             = 0x00010000;
-
-            IntPtr scm = OpenSCManager(null, null, SC_MANAGER_CONNECT);
-            if (scm == IntPtr.Zero) return;
-            try
-            {
-                foreach (var name in LhmServiceNames)
-                {
-                    // Stop if running
-                    try
-                    {
-                        using (var sc = new ServiceController(name))
-                        {
-                            if (sc.Status != ServiceControllerStatus.Stopped)
-                                sc.Stop();
-                        }
-                    }
-                    catch { }
-
-                    // Delete service entry
-                    IntPtr hSvc = OpenService(scm, name, SERVICE_STOP | DELETE);
-                    if (hSvc == IntPtr.Zero) continue;
-                    DeleteService(hSvc);
-                    CloseServiceHandle(hSvc);
-                }
-            }
-            finally { CloseServiceHandle(scm); }
+            if (_closing || IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(action); }
+            catch (InvalidOperationException) { }   // includes ObjectDisposedException
         }
 
         // ── CPU Sensor Access Check ───────────────────────────────────────
         // Only runs when CPU temp AND power could not be read for SensorFailThreshold
         // consecutive samples (see UpdateSensorHealth) or when the user asks from the tray.
         // Working sensors are never second-guessed, even if VBS is running.
-        // Flow: Secure Boot ON  → warn and bail out
-        //       Secure Boot OFF → check VBS/HVCI → offer to disable if blocked
+        // Flow: not admin → explain and stop
+        //       admin     → check VBS/HVCI → offer to disable if blocked
         private void CheckCpuSensorAccess(bool userInitiated = false)
         {
             if (_cpuSensorsOk)
@@ -442,16 +266,6 @@ namespace frm_sys_monitor
 
             VbsManager.Detect();
 
-            if (VbsManager.IsSecureBootOn)
-            {
-                _toolTip?.SetToolTip(lblCpuTemp, "CPU sensors unavailable — Secure Boot may be blocking the driver.");
-                _balloonIsUpdate = false;
-                _trayIcon.ShowBalloonTip(6000, "CPU Temp Unavailable",
-                    "Secure Boot is ON — disable it in BIOS to enable CPU sensor access.",
-                    ToolTipIcon.Warning);
-                return;
-            }
-
             // Without admin rights the driver can't be used at all, so VBS is not the culprit
             // (or at least not the first thing to fix) — don't offer to weaken security for it.
             if (!IsAdministrator())
@@ -463,12 +277,15 @@ namespace frm_sys_monitor
                 return;
             }
 
-            // Secure Boot OFF, elevated — check VBS/HVCI
+            // Elevated — check VBS/HVCI. Secure Boot alone doesn't block the signed PawnIO driver,
+            // so it is only mentioned as context, never as something to turn off.
             if (!VbsManager.IsSensorBlocked)
             {
                 _toolTip?.SetToolTip(lblCpuTemp, "CPU sensors unavailable — the sensor driver could not be used.");
                 if (userInitiated)
-                    MessageBox.Show("CPU sensors can't be read and VBS / HVCI are not running.\nThe sensor driver may have failed to load.",
+                    MessageBox.Show("CPU sensors can't be read and VBS / HVCI are not running.\n" +
+                        "The sensor driver may have failed to load (see Report Issue... for details)." +
+                        (VbsManager.IsSecureBootOn ? "\n\nSecure Boot is on; that normally does not block this driver." : ""),
                         "CPU Sensor Access", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -545,14 +362,14 @@ namespace frm_sys_monitor
             _updateBusy = true;
             System.Threading.Tasks.Task.Run(() =>
             {
-                Updater.ReleaseInfo latest = null;
+                ReleaseInfo latest = null;
                 string error = null;
                 try { latest = Updater.CheckLatest(); }
                 catch (Exception ex) { error = ex.Message; }
 
                 try
                 {
-                    this.BeginInvoke(new Action(() =>
+                    PostToUi(new Action(() =>
                     {
                         _updateBusy = false;
                         OnUpdateChecked(latest, error, userInitiated);
@@ -562,7 +379,7 @@ namespace frm_sys_monitor
             });
         }
 
-        private void OnUpdateChecked(Updater.ReleaseInfo latest, string error, bool userInitiated)
+        private void OnUpdateChecked(ReleaseInfo latest, string error, bool userInitiated)
         {
             if (latest == null || !Updater.IsNewer(latest))
             {
@@ -604,7 +421,7 @@ namespace frm_sys_monitor
                 try { file = Updater.Download(up); }
                 catch (Exception ex) { error = ex.Message; }
 
-                this.BeginInvoke(new Action(() =>
+                PostToUi(new Action(() =>
                 {
                     _updateBusy = false;
                     if (file == null)
@@ -884,6 +701,14 @@ namespace frm_sys_monitor
                     else if (key == "AutoCheckUpdates")     _autoCheckUpdates    = val != "0";
                     else if (key == "SuppressVbsPrompt")    _suppressVbsPrompt   = val == "1";
                     else if (key == "VbsDisableAttempted")  _vbsDisableAttempted = val == "1";
+                    else if (key == "AutoStartConfigured")  _autoStartConfigured = val == "1";
+                    else if (key == "FolderWarned")         _folderWarned        = val == "1";
+                    else if (key == "Location")
+                    {
+                        var xy = val.Split(',');
+                        if (xy.Length == 2 && int.TryParse(xy[0], out int x) && int.TryParse(xy[1], out int y))
+                            _savedLocation = new Point(x, y);
+                    }
                 }
             }
             catch { }
@@ -897,7 +722,10 @@ namespace frm_sys_monitor
                 "AccentColor=" + $"{_accentColor.R:X2}{_accentColor.G:X2}{_accentColor.B:X2}" + "\r\n" +
                 "AutoCheckUpdates=" + (_autoCheckUpdates ? "1" : "0") + "\r\n" +
                 "SuppressVbsPrompt=" + (_suppressVbsPrompt ? "1" : "0") + "\r\n" +
-                "VbsDisableAttempted=" + (_vbsDisableAttempted ? "1" : "0")); }
+                "VbsDisableAttempted=" + (_vbsDisableAttempted ? "1" : "0") + "\r\n" +
+                "AutoStartConfigured=" + (_autoStartConfigured ? "1" : "0") + "\r\n" +
+                "FolderWarned=" + (_folderWarned ? "1" : "0") + "\r\n" +
+                "Location=" + this.Left + "," + this.Top); }
             catch { }
         }
 
@@ -923,9 +751,11 @@ namespace frm_sys_monitor
         // ── System Tray ───────────────────────────────────────────────────
         private void InitTray()
         {
-            // Auto-start: register on first run if not already set
+            // Auto-start: register once on the very first run; afterwards the user's
+            // choice (tray → "Start with Windows") is respected and never re-enabled.
             _autoStart = IsAutoStartEnabled();
-            if (!_autoStart) { SetAutoStart(true); _autoStart = true; }
+            if (!_autoStart && !_autoStartConfigured) { SetAutoStart(true); _autoStart = IsAutoStartEnabled(); }
+            if (!_autoStartConfigured) { _autoStartConfigured = true; SaveSettings(); }
 
             SetClickThrough(true);
             var clickThroughItem = new ToolStripMenuItem("Click-Through: ON");
@@ -950,8 +780,11 @@ namespace frm_sys_monitor
             };
             autoStartItem.Click += (s, ev) =>
             {
-                _autoStart = autoStartItem.Checked;
-                SetAutoStart(_autoStart);
+                SetAutoStart(autoStartItem.Checked);
+                _autoStart = IsAutoStartEnabled();
+                autoStartItem.Checked = _autoStart;
+                _autoStartConfigured = true;
+                SaveSettings();
             };
 
             var colorItem = new ToolStripMenuItem("Accent Color...");
@@ -1000,6 +833,7 @@ namespace frm_sys_monitor
                     {
                         var wa = Screen.AllScreens[idx].WorkingArea;
                         this.Location = new Point(wa.Right - this.Width - 10, wa.Top + 10);
+                        SaveSettings();
                     };
                     monitorsMenu.DropDownItems.Add(mi);
                 }
@@ -1110,6 +944,7 @@ namespace frm_sys_monitor
 
         // ── Timer — 200 ms UI tick / 1000 ms hw tick ──────────────────────
         private volatile bool _hwReading;
+        private volatile bool _closing;
 
         private void SystemTimer_Tick(object sender, EventArgs e)
         {
@@ -1133,53 +968,56 @@ namespace frm_sys_monitor
 
         private void ReadAllSensors()
         {
-            float ramUsed = 0, ramAvailable = 0;
-            string cpuTempText = null;
-            int cpuTempBestRank = int.MaxValue;
-            float cpuWatts = 0, gpuWatts = 0;
-            float cpuClockSum = 0; int cpuClockCount = 0;
-            float vramUsedMB = 0, vramTotalMB = 0, gpuHotspotTemp = 0, ssdTemp = 0;
-
-            _computer.Accept(new UpdateVisitor());
-
-            foreach (IHardware hw in _computer.Hardware)
-                ReadSensorsRecursive(hw, ref cpuTempText, ref cpuTempBestRank,
-                    ref cpuWatts, ref gpuWatts, ref cpuClockSum, ref cpuClockCount,
-                    ref vramUsedMB, ref vramTotalMB, ref gpuHotspotTemp,
-                    ref ssdTemp, ref ramUsed, ref ramAvailable);
+            var snap = SensorReader.Read(_computer);
 
             // PerfCounter (APERF/MPERF-based effective clock) is primary;
             // LHM average is fallback for machines where PerfCounter fails.
-            float cpuMaxMHz = GetCpuClockPerf();
-            if (cpuMaxMHz <= 0 && cpuClockCount > 0) cpuMaxMHz = cpuClockSum / cpuClockCount;
+            float cpuMHz = GetCpuClockPerf();
+            if (cpuMHz <= 0) cpuMHz = snap.CpuClockAvgMHz;
 
             // Intel Energy API override (only if returns real data)
             if (_intelPowerOk
                 && IntelPowerApi.GetPowerData(0, 0, out double pkgW, out _, out _)
                 && pkgW > 0)
-                cpuWatts = (float)pkgW;
+                snap.CpuWatts = (float)pkgW;
 
             // Marshal all UI updates back to the UI thread at once
-            this.BeginInvoke(new Action(() => ApplySensorResults(
-                cpuTempText, ramUsed, ramAvailable, cpuMaxMHz,
-                cpuWatts, gpuWatts, vramUsedMB, vramTotalMB,
-                gpuHotspotTemp, ssdTemp)));
+            PostToUi(() => ApplySensorResults(snap, cpuMHz));
         }
 
-        private void ApplySensorResults(
-            string cpuTempText, float ramUsed, float ramAvailable, float cpuMaxMHz,
-            float cpuWatts, float gpuWatts, float vramUsedMB, float vramTotalMB,
-            float gpuHotspotTemp, float ssdTemp)
+        private void ApplySensorResults(SensorSnapshot s, float cpuMHz)
         {
-            lblCpuTemp.Text = cpuTempText ?? "CPU  --°C";
-            UpdateSensorHealth(cpuTempText != null || cpuWatts > 0);
-
-            if (ramUsed > 0 || ramAvailable > 0)
-                lblRam.Text = $"RAM  {ramUsed:F1} / {ramUsed + ramAvailable:F0} GB";
-
-            if (cpuMaxMHz > 0)
+            if (s.CpuLoad.HasValue)
             {
-                float ghz = cpuMaxMHz / 1000f;
+                _lastCpuLoad   = s.CpuLoad.Value;
+                pbCPU.Value    = _lastCpuLoad;
+                lblCpuPct.Text = $"{_lastCpuLoad}%";
+                CenterLabel(lblCpuPct, pbCPU);
+            }
+            if (s.GpuLoad.HasValue)
+            {
+                _lastGpuLoad   = s.GpuLoad.Value;
+                pbGPU.Value    = _lastGpuLoad;
+                lblGpuPct.Text = $"{_lastGpuLoad}%";
+                CenterLabel(lblGpuPct, pbGPU);
+            }
+            if (s.GpuTemp > 0)
+            {
+                lblGpuTemp.Text      = $"GPU  {(int)s.GpuTemp}°C";
+                lblGpuTemp.ForeColor = s.GpuTemp >= 80f ? Color.Red
+                                     : s.GpuTemp >= 70f ? Color.Orange
+                                                        : Color.Cyan;
+            }
+
+            lblCpuTemp.Text = s.CpuTemp.HasValue ? $"CPU  {s.CpuTemp}°C" : "CPU  --°C";
+            UpdateSensorHealth(s.CpuTemp.HasValue || s.CpuWatts > 0);
+
+            if (s.RamUsedGB > 0 || s.RamAvailableGB > 0)
+                lblRam.Text = $"RAM  {s.RamUsedGB:F1} / {s.RamUsedGB + s.RamAvailableGB:F0} GB";
+
+            if (cpuMHz > 0)
+            {
+                float ghz = cpuMHz / 1000f;
                 lblClock.Text      = $"CLK  {ghz:F2} GHz";
                 lblClock.ForeColor = ghz >= 5.0f ? Color.Orange : Color.FromArgb(120, 220, 255);
             }
@@ -1193,206 +1031,39 @@ namespace frm_sys_monitor
             {
                 if (_lblGpuDetail != null)
                     _lblGpuDetail.Text =
-                        $"HOT  {(gpuHotspotTemp > 0 ? $"{(int)gpuHotspotTemp}°C" : "--°C")}" +
-                        $"  |  GPU  {(gpuWatts > 0 ? $"{(int)gpuWatts}W" : "--W")}";
+                        $"HOT  {(s.GpuHotspotTemp > 0 ? $"{(int)s.GpuHotspotTemp}°C" : "--°C")}" +
+                        $"  |  GPU  {(s.GpuWatts > 0 ? $"{(int)s.GpuWatts}W" : "--W")}";
                 if (_lblSsdTemp != null)
-                    _lblSsdTemp.Text = ssdTemp > 0 ? $"SSD  {(int)ssdTemp}°C" : "SSD  --°C";
+                    _lblSsdTemp.Text = s.SsdTemp > 0 ? $"SSD  {(int)s.SsdTemp}°C" : "SSD  --°C";
             }
             else
             {
-                lblPower.Text = $"PWR  {(cpuWatts > 0 ? $"{cpuWatts:F0}W" : "--W")} | {(gpuWatts > 0 ? $"{gpuWatts:F0}W" : "--W")}";
+                lblPower.Text = $"PWR  {Watts(s.CpuWatts)} | {Watts(s.GpuWatts)}";
             }
 
-            if (vramTotalMB > 0)
+            if (s.VramTotalMB > 0)
             {
-                lblVramTag.Text = $"VRAM {vramUsedMB / 1024f:F1}/{vramTotalMB / 1024f:F0} GB";
-                pbVram.Value    = Math.Min((int)(vramUsedMB / vramTotalMB * 100), 100);
+                lblVramTag.Text = $"VRAM {s.VramUsedMB / 1024f:F1}/{s.VramTotalMB / 1024f:F0} GB";
+                pbVram.Value    = Math.Max(0, Math.Min((int)(s.VramUsedMB / s.VramTotalMB * 100), 100));
             }
 
-            UpdateTrayTooltip(cpuTempText, ramUsed, ramAvailable, cpuWatts, gpuWatts);
+            UpdateTrayTooltip(s);
         }
 
-        private void UpdateTrayTooltip(string cpuTempText, float ramUsed, float ramAvailable,
-            float cpuWatts, float gpuWatts)
+        private static string Watts(float w) => w > 0 ? $"{w:F0}W" : "--W";
+
+        private void UpdateTrayTooltip(SensorSnapshot s)
         {
             if (_trayIcon == null) return;
 
-            string cpuTemp = cpuTempText != null ? ParseTempFromText(cpuTempText) + "°C" : "--°C";
-            string ram     = ramUsed > 0 ? $"{ramUsed:F1} / {ramUsed + ramAvailable:F0} GB" : "-- GB";
-            string cpuPwr  = cpuWatts > 0 ? $"{cpuWatts:F0} W" : "-- W";
-            string gpuPwr  = gpuWatts > 0 ? $"{gpuWatts:F0} W" : "-- W";
+            string cpuTemp = s.CpuTemp.HasValue ? s.CpuTemp + "°C" : "--°C";
+            string ram     = s.RamUsedGB > 0 ? $"{s.RamUsedGB:F1} / {s.RamUsedGB + s.RamAvailableGB:F0} GB" : "-- GB";
 
-            // NotifyIcon.Text supports \n but is capped at 127 chars by Windows
-            string tip = $"CPU  {_lastCpuLoad}%  {cpuTemp}  {cpuPwr}\nGPU  {_lastGpuLoad}%  {gpuPwr}\nRAM  {ram}";
+            // NotifyIcon.Text is capped at 127 chars by Windows
+            string tip = $"CPU  {_lastCpuLoad}%  {cpuTemp}  {Watts(s.CpuWatts)}\nGPU  {_lastGpuLoad}%  {Watts(s.GpuWatts)}\nRAM  {ram}";
             if (tip.Length > 127) tip = tip.Substring(0, 127);
             _trayIcon.Text = tip;
         }
-
-        // ── Sensor Reading (background-thread safe — no UI access) ───────────
-        private void ReadSensorsRecursive(IHardware hw,
-            ref string cpuTempText, ref int cpuTempBestRank,
-            ref float cpuWatts, ref float gpuWatts, ref float cpuClockSum, ref int cpuClockCount,
-            ref float vramUsedMB, ref float vramTotalMB,
-            ref float gpuHotspotTemp, ref float ssdTemp,
-            ref float ramUsed, ref float ramAvailable)
-        {
-            ReadSensors(hw, ref cpuTempText, ref cpuTempBestRank,
-                ref cpuWatts, ref gpuWatts, ref cpuClockSum, ref cpuClockCount,
-                ref vramUsedMB, ref vramTotalMB,
-                ref gpuHotspotTemp, ref ssdTemp, ref ramUsed, ref ramAvailable);
-            foreach (IHardware sub in hw.SubHardware)
-                ReadSensorsRecursive(sub, ref cpuTempText, ref cpuTempBestRank,
-                    ref cpuWatts, ref gpuWatts, ref cpuClockSum, ref cpuClockCount,
-                    ref vramUsedMB, ref vramTotalMB,
-                    ref gpuHotspotTemp, ref ssdTemp, ref ramUsed, ref ramAvailable);
-        }
-
-        private void ReadSensors(IHardware hw,
-            ref string cpuTempText, ref int cpuTempBestRank,
-            ref float cpuWatts, ref float gpuWatts, ref float cpuClockSum, ref int cpuClockCount,
-            ref float vramUsedMB, ref float vramTotalMB,
-            ref float gpuHotspotTemp, ref float ssdTemp,
-            ref float ramUsed, ref float ramAvailable)
-        {
-            bool isCpu = hw.HardwareType == HardwareType.Cpu;
-            bool isGpu = hw.HardwareType == HardwareType.GpuNvidia
-                      || hw.HardwareType == HardwareType.GpuAmd
-                      || hw.HardwareType == HardwareType.GpuIntel;
-            bool isMb  = hw.HardwareType == HardwareType.Motherboard
-                      || hw.HardwareType == HardwareType.SuperIO;
-            bool isRam = hw.HardwareType == HardwareType.Memory
-                      && hw.Name.IndexOf("Virtual", StringComparison.OrdinalIgnoreCase) < 0;
-
-            foreach (ISensor s in hw.Sensors)
-            {
-                if (s.Value == null) continue;
-                float val = s.Value.Value;
-
-                if (isCpu)
-                {
-                    if (s.SensorType == SensorType.Load && s.Name == "CPU Total")
-                    {
-                        int load = Math.Min((int)val, 100);
-                        _lastCpuLoad = load;
-                        // CPU ring — safe to update from any thread via BeginInvoke
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            pbCPU.Value    = load;
-                            lblCpuPct.Text = $"{load}%";
-                            CenterLabel(lblCpuPct, pbCPU);
-                        }));
-                    }
-                    if (s.SensorType == SensorType.Temperature)
-                        TrySetCpuTemp(s.Name, (int)val, ref cpuTempText, ref cpuTempBestRank);
-                    if (s.SensorType == SensorType.Power && val > 0)
-                    {
-                        if (s.Name == "CPU Package") cpuWatts = val;
-                        else if (cpuWatts <= 0)      cpuWatts = val;
-                    }
-                    if (s.SensorType == SensorType.Clock
-                        && s.Name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0
-                        && val > 0)
-                    {
-                        cpuClockSum += val;
-                        cpuClockCount++;
-                    }
-                }
-
-                if (isMb && s.SensorType == SensorType.Temperature)
-                {
-                    string n = s.Name;
-                    if (n.IndexOf("CPU",  StringComparison.OrdinalIgnoreCase) >= 0
-                     || n.IndexOf("Tdie", StringComparison.OrdinalIgnoreCase) >= 0
-                     || n.IndexOf("Tctl", StringComparison.OrdinalIgnoreCase) >= 0)
-                        TrySetCpuTemp(n, (int)val, ref cpuTempText, ref cpuTempBestRank);
-                }
-
-                if (isGpu)
-                {
-                    if (s.SensorType == SensorType.Load && s.Name == "GPU Core")
-                    {
-                        int load = Math.Min((int)val, 100);
-                        _lastGpuLoad = load;
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            pbGPU.Value    = load;
-                            lblGpuPct.Text = $"{load}%";
-                            CenterLabel(lblGpuPct, pbGPU);
-                        }));
-                    }
-                    if (s.SensorType == SensorType.Temperature)
-                    {
-                        if (s.Name == "GPU Core")
-                        {
-                            float v = val;
-                            this.BeginInvoke(new Action(() =>
-                            {
-                                lblGpuTemp.Text      = $"GPU  {(int)v}°C";
-                                lblGpuTemp.ForeColor = v >= 80f ? Color.Red
-                                                     : v >= 70f ? Color.Orange
-                                                                : Color.Cyan;
-                            }));
-                        }
-                        if ((s.Name == "GPU Hot Spot" || s.Name == "GPU Memory Junction")
-                            && val > gpuHotspotTemp)
-                            gpuHotspotTemp = val;
-                    }
-                    if (s.SensorType == SensorType.Power && val > 0)
-                    {
-                        if      (s.Name == "GPU Power" || s.Name == "GPU Package") gpuWatts = val;
-                        else if (s.Name == "GPU Core" && gpuWatts <= 0)            gpuWatts = val;
-                        else if (gpuWatts <= 0)                                    gpuWatts = val;
-                    }
-                    if (s.SensorType == SensorType.SmallData)
-                    {
-                        if (s.Name == "GPU Memory Used")  vramUsedMB  = val;
-                        if (s.Name == "GPU Memory Total") vramTotalMB = val;
-                    }
-                }
-
-                if (hw.HardwareType == HardwareType.Storage
-                    && s.SensorType == SensorType.Temperature
-                    && s.Name.IndexOf("Warning",  StringComparison.OrdinalIgnoreCase) < 0   // NVMe threshold sensors,
-                    && s.Name.IndexOf("Critical", StringComparison.OrdinalIgnoreCase) < 0   // not live temperatures
-                    && val > ssdTemp)
-                    ssdTemp = val;
-
-                if (isRam && s.SensorType == SensorType.Data)
-                {
-                    if (s.Name == "Memory Used")           ramUsed      = val;
-                    else if (s.Name == "Memory Available") ramAvailable = val;
-                }
-            }
-        }
-
-        private static void TrySetCpuTemp(string name, int temp,
-            ref string cpuTempText, ref int cpuTempBestRank)
-        {
-            int rank = CpuTempPriority.Length;
-            for (int i = 0; i < CpuTempPriority.Length; i++)
-                if (string.Equals(CpuTempPriority[i], name, StringComparison.OrdinalIgnoreCase))
-                { rank = i; break; }
-
-            if (cpuTempText == null || rank < cpuTempBestRank
-                || (rank == cpuTempBestRank && temp > ParseTempFromText(cpuTempText)))
-            {
-                cpuTempBestRank = rank;
-                cpuTempText     = $"CPU  {temp}°C";
-            }
-        }
-
-        private static int ParseTempFromText(string text)
-        {
-            if (text == null) return 0;
-            int deg = text.IndexOf('°');
-            if (deg < 1) return 0;
-            int start = deg - 1;
-            while (start > 0 && char.IsDigit(text[start - 1])) start--;
-            int.TryParse(text.Substring(start, deg - start), out int v);
-            return v;
-        }
-
-
 
         private float GetCpuClockPerf()
         {
@@ -1415,6 +1086,5 @@ namespace frm_sys_monitor
             // Guna2HtmlLabel adds ~2px internal top-padding; subtract to compensate
             label.Top  = (parent.Height - sz.Height) / 2 - 2;
         }
-
-            }
-        }
+    }
+}
