@@ -76,6 +76,8 @@ namespace frm_sys_monitor
         private bool   _cpuSensorsOk;
         private bool   _autoCheckUpdates = true;
         private ReleaseInfo _pendingUpdate;
+        private Timer  _updateTimer;
+        private string _autoInstalledVersion;  // last version installed automatically (loop guard)
         private bool   _updateBusy;
         private bool   _balloonIsUpdate;
         private ToolStripMenuItem _updateItem;
@@ -142,9 +144,7 @@ namespace frm_sys_monitor
             _systemTimer.Tick += SystemTimer_Tick;
             _systemTimer.Start();
 
-            // Give the network a moment after login before hitting GitHub.
-            if (_autoCheckUpdates)
-                System.Threading.Tasks.Task.Delay(15000).ContinueWith(_ => CheckForUpdate(false));
+            StartUpdateChecks();
         }
 
         private void Form1_KeyDown(object sender, KeyEventArgs e)
@@ -234,6 +234,7 @@ namespace frm_sys_monitor
             // objects it uses (LHM Computer, perf counter) are torn down.
             _closing = true;
             _systemTimer?.Stop();
+            _updateTimer?.Stop();
             var sw = Stopwatch.StartNew();
             while ((_hwReading || !_hardwareReady) && sw.ElapsedMilliseconds < 3000)
                 System.Threading.Thread.Sleep(20);
@@ -365,8 +366,25 @@ namespace frm_sys_monitor
         }
 
         // ── Auto Update ───────────────────────────────────────────────────
-        // Startup check is silent (tray balloon only). Downloading and restarting always
-        // needs the user's OK, and the exe is verified against the release's SHA-256.
+        // With "Update automatically" on (default), the app checks shortly after start and then
+        // every few hours; a newer release is downloaded, verified against its SHA-256 and
+        // installed, and the app restarts by itself. With it off, nothing is checked unless the
+        // user picks "Check for Updates...", and installing then asks first.
+        private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
+
+        private void StartUpdateChecks()
+        {
+            // Give the network a moment after login before hitting GitHub.
+            System.Threading.Tasks.Task.Delay(15000).ContinueWith(_ => PostToUi(() =>
+            {
+                if (_autoCheckUpdates) CheckForUpdate(false);
+            }));
+
+            _updateTimer = new Timer { Interval = (int)UpdateCheckInterval.TotalMilliseconds };
+            _updateTimer.Tick += (s, e) => { if (_autoCheckUpdates) CheckForUpdate(false); };
+            _updateTimer.Start();
+        }
+
         private void CheckForUpdate(bool userInitiated)
         {
             if (_updateBusy) return;
@@ -378,15 +396,11 @@ namespace frm_sys_monitor
                 try { latest = Updater.CheckLatest(); }
                 catch (Exception ex) { error = ex.Message; }
 
-                try
+                PostToUi(new Action(() =>
                 {
-                    PostToUi(new Action(() =>
-                    {
-                        _updateBusy = false;
-                        OnUpdateChecked(latest, error, userInitiated);
-                    }));
-                }
-                catch { _updateBusy = false; }   // form already closed
+                    _updateBusy = false;
+                    OnUpdateChecked(latest, error, userInitiated);
+                }));
             });
         }
 
@@ -408,9 +422,25 @@ namespace frm_sys_monitor
 
             if (userInitiated) { PromptUpdate(); return; }
 
+            // Install on our own, unless this exact version was already auto-installed and we are
+            // still older (the published exe reports a wrong version): then only notify, or every
+            // start would download it again.
+            string ver = latest.Version.ToString(3);
+            if (_autoCheckUpdates && _autoInstalledVersion != ver)
+            {
+                _autoInstalledVersion = ver;
+                SaveSettings();
+                InstallUpdate(latest, silent: true);
+                return;
+            }
+
+            ShowUpdateBalloon($"Version {ver} is available. Click to install.", ToolTipIcon.Info);
+        }
+
+        private void ShowUpdateBalloon(string text, ToolTipIcon icon)
+        {
             _balloonIsUpdate = true;
-            _trayIcon.ShowBalloonTip(8000, "System Monitor update",
-                $"Version {latest.Version.ToString(3)} is available. Click to install.", ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(8000, "System Monitor update", text, icon);
         }
 
         private void PromptUpdate()
@@ -424,8 +454,17 @@ namespace frm_sys_monitor
                     "System Monitor Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
+            InstallUpdate(up, silent: false);
+        }
+
+        // Downloads + verifies off the UI thread, then hands over to the swap script and exits.
+        // silent: failures go to a tray balloon (click to retry) instead of a message box.
+        private void InstallUpdate(ReleaseInfo up, bool silent)
+        {
+            if (_updateBusy) return;
             _updateBusy = true;
-            _updateItem.Text = "Downloading update...";
+            string ver = up.Version.ToString(3);
+            _updateItem.Text = $"Downloading v{ver}...";
             System.Threading.Tasks.Task.Run(() =>
             {
                 string file = null, error = null;
@@ -435,25 +474,52 @@ namespace frm_sys_monitor
                 PostToUi(new Action(() =>
                 {
                     _updateBusy = false;
-                    if (file == null)
-                    {
-                        _updateItem.Text = $"Update available: v{up.Version.ToString(3)}";
-                        MessageBox.Show("Update failed:\n" + error, "System Monitor Update",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
                     try
                     {
+                        if (file == null) throw new InvalidOperationException(error);
+                        if (silent)
+                            _trayIcon.ShowBalloonTip(3000, "System Monitor update",
+                                $"Installing version {ver}; the app restarts in a moment.", ToolTipIcon.Info);
                         Updater.ApplyAndRestart(file);
                         Application.Exit();
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show("Could not start the updater:\n" + ex.Message, "System Monitor Update",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        _updateItem.Text = $"Update available: v{ver}";
+                        if (silent)
+                        {
+                            // Nothing was installed, so let the next periodic check try again.
+                            _autoInstalledVersion = null;
+                            SaveSettings();
+                        }
+                        if (silent)
+                            ShowUpdateBalloon($"Automatic update to {ver} failed. Click to try again.", ToolTipIcon.Warning);
+                        else
+                            MessageBox.Show("Update failed:\n" + ex.Message, "System Monitor Update",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }));
             });
+        }
+
+        // ── About ─────────────────────────────────────────────────────────
+        private const string RepoUrl = "https://github.com/ThanhNguyenVN93/System-Monitor";
+
+        private void ShowAbout()
+        {
+            string text =
+                $"System Monitor v{Updater.CurrentVersion.ToString(3)}\n" +
+                "Always-on-top HUD for CPU, GPU, RAM and VRAM stats.\n\n" +
+                "Copyright © 2026 — MIT License\n" +
+                RepoUrl + "\n\n" +
+                "Uses LibreHardwareMonitor (MPL-2.0), the PawnIO driver and Guna UI2.\n" +
+                "Settings: " + DataDir + "\n\n" +
+                "Open the project page on GitHub?";
+            if (MessageBox.Show(text, "About System Monitor", MessageBoxButtons.YesNo, MessageBoxIcon.Information)
+                == DialogResult.Yes)
+            {
+                try { Process.Start(new ProcessStartInfo(RepoUrl) { UseShellExecute = true }); } catch { }
+            }
         }
 
         // ── Issue Report ──────────────────────────────────────────────────
@@ -727,6 +793,7 @@ namespace frm_sys_monitor
                     else if (key == "VbsDisableAttempted")  _vbsDisableAttempted = val == "1";
                     else if (key == "AutoStartConfigured")  _autoStartConfigured = val == "1";
                     else if (key == "FolderWarned")         _folderWarned        = val == "1";
+                    else if (key == "AutoInstalledVersion") _autoInstalledVersion = val;
                     else if (key == "Location")
                     {
                         var xy = val.Split(',');
@@ -750,6 +817,7 @@ namespace frm_sys_monitor
                 "VbsDisableAttempted=" + (_vbsDisableAttempted ? "1" : "0") + "\r\n" +
                 "AutoStartConfigured=" + (_autoStartConfigured ? "1" : "0") + "\r\n" +
                 "FolderWarned=" + (_folderWarned ? "1" : "0") + "\r\n" +
+                "AutoInstalledVersion=" + (_autoInstalledVersion ?? "") + "\r\n" +
                 "Location=" + this.Left + "," + this.Top); }
             catch { }
         }
@@ -830,15 +898,23 @@ namespace frm_sys_monitor
                 else CheckForUpdate(true);
             };
 
-            var autoUpdateItem = new ToolStripMenuItem("Check for updates on startup")
+            var autoUpdateItem = new ToolStripMenuItem("Update automatically")
             {
                 CheckOnClick = true,
                 Checked      = _autoCheckUpdates,
             };
-            autoUpdateItem.Click += (s, ev) => { _autoCheckUpdates = autoUpdateItem.Checked; SaveSettings(); };
+            autoUpdateItem.Click += (s, ev) =>
+            {
+                _autoCheckUpdates = autoUpdateItem.Checked;
+                SaveSettings();
+                if (_autoCheckUpdates) CheckForUpdate(false);   // act now, not in 6 hours
+            };
 
             var reportItem = new ToolStripMenuItem("Report Issue...");
             reportItem.Click += (s, ev) => ReportIssue();
+
+            var aboutItem = new ToolStripMenuItem("About System Monitor...");
+            aboutItem.Click += (s, ev) => ShowAbout();
 
             var monitorsMenu = new ToolStripMenuItem("Move to Monitor");
 
@@ -865,7 +941,7 @@ namespace frm_sys_monitor
                 }
             };
 
-            menu.Items.Add("System Monitor").Enabled = false;
+            menu.Items.Add($"System Monitor v{Updater.CurrentVersion.ToString(3)}").Enabled = false;
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(clickThroughItem);
             menu.Items.Add(showHideItem);
@@ -877,6 +953,7 @@ namespace frm_sys_monitor
             menu.Items.Add(autoUpdateItem);
             menu.Items.Add(monitorsMenu);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(aboutItem);
             menu.Items.Add("Exit", null, (s, ev) => Application.Exit());
 
             _trayIcon = new NotifyIcon
