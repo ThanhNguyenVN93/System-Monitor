@@ -101,12 +101,14 @@ get a version that updates by itself.
 
 ## Releasing
 
-1. Bump `AssemblyVersion` / `AssemblyFileVersion` in `Properties/AssemblyInfo.cs`.
-2. Merge to `master`, then push a matching tag, e.g. `git tag v1.2.1 && git push origin v1.2.1`.
+1. In a PR, bump `AssemblyVersion` / `AssemblyFileVersion` in `Properties/AssemblyInfo.cs`.
+2. Merge to `master`.
 
-The **Release** workflow checks that the tag matches the version, builds, runs the tests and publishes
-`SystemMonitor.exe` + `SystemMonitor.exe.sha256` to a GitHub Release. The CI build has no Intel Power
-Gadget files; to ship a build with them, build locally and replace both assets on the release.
+That's it. Every push to `master` runs the **Release** workflow: it reads the version, and if the tag
+`v<version>` does not exist yet, it builds, runs the tests and publishes `SystemMonitor.exe` +
+`SystemMonitor.exe.sha256` as a GitHub Release. Merges that don't change the version release nothing.
+The CI build has no Intel Power Gadget files; to ship a build with them, build locally and replace both
+assets on the release.
 
 ## Third-party Libraries
 

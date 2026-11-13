@@ -1,9 +1,17 @@
 name: Release
-# Push a tag like v1.2.1 to build the single exe and publish it as a GitHub Release with the
-# asset names the in-app updater expects (SystemMonitor.exe + SystemMonitor.exe.sha256).
+# Runs on every push to master. The version in Properties/AssemblyInfo.cs decides whether anything
+# is released: if the tag v<version> already exists, the run does nothing. So a normal merge
+# ships nothing; bump AssemblyVersion in a PR and the merge publishes the new version.
+# Assets use the names the in-app updater expects (SystemMonitor.exe + SystemMonitor.exe.sha256).
 on:
   push:
-    tags: ['v*']
+    branches: [master]
+  workflow_dispatch:
+
+# One release run at a time; a second merge waits instead of racing for the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -15,15 +23,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
 
-      - name: Check tag matches AssemblyVersion
+      - name: Read version and check whether it is already released
+        id: version
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
           $m = Select-String -Path Properties/AssemblyInfo.cs -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)' | Select-Object -First 1
           $ver = $m.Matches[0].Groups[1].Value
-          if ($ver -ne $tag) { Write-Error "Tag v$tag does not match AssemblyVersion $ver"; exit 1 }
+          $tag = "v$ver"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "$tag is already released; nothing to do."
+            "new=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "$tag is new; releasing."
+            "new=true" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Build Release
+        if: steps.version.outputs.new == 'true'
         shell: pwsh
         env:
           FX_REF: C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8
@@ -32,12 +52,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Unit tests
+        if: steps.version.outputs.new == 'true'
         shell: pwsh
         run: |
           dotnet test tests/frm_sys_monitor.Tests --nologo
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package single exe + checksum
+        if: steps.version.outputs.new == 'true'
         shell: pwsh
         run: |
           $files = Get-ChildItem bin/Release -File
@@ -47,18 +69,15 @@ jobs:
           $hash = (Get-FileHash dist/SystemMonitor.exe -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path dist/SystemMonitor.exe.sha256 -Value "$hash  SystemMonitor.exe" -NoNewline -Encoding ascii
 
-      # Intel Power Gadget files are not in the repo, so this build has no Intel power readout.
+      # Intel Power Gadget files are not in the repo, so these builds have no Intel power readout.
       # To ship a build with it, build locally and replace both assets on the release.
       - name: Publish GitHub Release
+        if: steps.version.outputs.new == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag dist/SystemMonitor.exe dist/SystemMonitor.exe.sha256 --clobber
-          } else {
-            gh release create $tag dist/SystemMonitor.exe dist/SystemMonitor.exe.sha256 --title "System Monitor $tag" --generate-notes
-          }
+          $tag = "${{ steps.version.outputs.tag }}"
+          gh release create $tag dist/SystemMonitor.exe dist/SystemMonitor.exe.sha256 `
+            --target $env:GITHUB_SHA --title "System Monitor $tag" --generate-notes
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
